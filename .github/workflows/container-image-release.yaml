@@ -27,6 +27,6 @@ jobs:
     uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.17
     with:
       image_name: fortivpn-gateway
-      platforms: linux/amd64,arm64
+      platforms: linux/amd64,linux/arm64
       force_version: ${{ github.event.inputs.custom_tag || (github.event_name == 'release' && github.event.release.tag_name) || github.event.inputs.version }}
     secrets: inherit
