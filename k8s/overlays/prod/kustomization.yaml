@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: networking
+resources:
+  - ../../base
+  - secret.enc.yaml
+images:
+  - name: ghcr.io/calebsargeant/fortivpn-gateway-cookie
+    newTag: latest # {"$imagepolicy": "flux-system:fortivpn-gateway-cookie:tag"}
+  - name: ghcr.io/calebsargeant/fortivpn-gateway-vpn
+    newTag: latest # {"$imagepolicy": "flux-system:fortivpn-gateway-vpn:tag"}
+  - name: ghcr.io/calebsargeant/fortivpn-gateway-bgp
+    newTag: latest # {"$imagepolicy": "flux-system:fortivpn-gateway-bgp:tag"}

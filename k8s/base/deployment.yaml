@@ -1,0 +1,166 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fortivpn-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fortivpn-gateway
+  template:
+    metadata:
+      labels:
+        app: fortivpn-gateway
+    spec:
+      hostNetwork: true  # Required for BGP peering
+      dnsPolicy: ClusterFirstWithHostNet
+      imagePullSecrets:
+      - name: ghcr-pull-secret
+      
+      # Init container to set up /dev/ppp
+      initContainers:
+      - name: setup-ppp
+        image: busybox:latest
+        command: ['sh', '-c', 'mknod /dev/ppp c 108 0 || true']
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: dev
+          mountPath: /dev
+      
+      containers:
+      # Cookie extraction
+      - name: cookie
+        image: ghcr.io/calebsargeant/fortivpn-gateway-cookie:latest
+        imagePullPolicy: Always
+        env:
+        - name: OP_SERVICE_ACCOUNT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: OP_SERVICE_ACCOUNT_TOKEN
+        - name: OP_ITEM_NAME
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: OP_ITEM_NAME
+        - name: OP_VAULT
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: OP_VAULT
+        - name: VPN_GATEWAY
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: VPN_GATEWAY
+        - name: VPN_PORT
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: VPN_PORT
+              optional: true
+        - name: CONTINUOUS_REFRESH
+          value: "true"
+        - name: REFRESH_INTERVAL
+          value: "3600"  # Refresh every hour
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: shared
+          mountPath: /shared
+        - name: dshm
+          mountPath: /dev/shm
+      
+      # VPN client container
+      - name: vpn
+        image: ghcr.io/calebsargeant/fortivpn-gateway-vpn:latest
+        imagePullPolicy: Always
+        env:
+        - name: VPN_GATEWAY
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: VPN_GATEWAY
+        - name: VPN_PORT
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: VPN_PORT
+              optional: true
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        volumeMounts:
+        - name: shared
+          mountPath: /shared
+        - name: dev
+          mountPath: /dev
+      
+      # BGP routing container
+      - name: bgp
+        image: ghcr.io/calebsargeant/fortivpn-gateway-bgp:latest
+        imagePullPolicy: Always
+        env:
+        - name: BGP_ROUTER_ID
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: BGP_ROUTER_ID
+        - name: BGP_LOCAL_AS
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: BGP_LOCAL_AS
+        - name: BGP_NEIGHBOR_IP
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: BGP_NEIGHBOR_IP
+        - name: BGP_NEIGHBOR_AS
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: BGP_NEIGHBOR_AS
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      
+      volumes:
+      - name: shared
+        emptyDir: {}
+      - name: dev
+        hostPath:
+          path: /dev
+          type: Directory
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 512Mi
+      
+      restartPolicy: Always

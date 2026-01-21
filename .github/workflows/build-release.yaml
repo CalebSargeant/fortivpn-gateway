@@ -1,0 +1,45 @@
+name: Semantic Release
+
+# This workflow runs semantic-release which will:
+# 1. Analyze commits and determine version
+# 2. Create a GitHub release with proper tag
+# 3. Trigger the container-image-release workflow via the new GitHub release
+# 4. Docker image will be built and tagged with the version
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  # Run semantic release
+  semantic-release:
+    name: Semantic Release
+    uses: calebsargeant/reusable-workflows/.github/workflows/semantic-release.yaml@v1.0.17
+    with:
+      bump: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.bump || '' }}
+      working_directory: '.'
+    secrets:
+      SEMANTIC_RELEASE_APP_ID: ${{ secrets.SEMANTIC_RELEASE_APP_ID }}
+      SEMANTIC_RELEASE_APP_PRIVATE_KEY: ${{ secrets.SEMANTIC_RELEASE_APP_PRIVATE_KEY }}

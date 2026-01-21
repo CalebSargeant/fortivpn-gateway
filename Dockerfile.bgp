@@ -1,0 +1,19 @@
+FROM debian:bookworm-slim
+
+# Install BIRD BGP daemon
+RUN apt-get update && apt-get install -y \
+    bird2 \
+    iproute2 \
+    iputils-ping \
+    traceroute \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create directories
+RUN mkdir -p /etc/bird /var/run/bird
+
+# Copy BGP configuration template
+COPY scripts/bird.conf.template /etc/bird/bird.conf.template
+COPY scripts/bgp-entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+CMD ["/usr/local/bin/entrypoint.sh"]

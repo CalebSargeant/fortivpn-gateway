@@ -1,0 +1,35 @@
+FROM debian:bookworm-slim
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    autoconf \
+    automake \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    ppp \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone and build openfortivpn
+WORKDIR /tmp/build
+RUN git clone https://github.com/adrienverge/openfortivpn.git && \
+    cd openfortivpn && \
+    ./autogen.sh && \
+    ./configure --prefix=/usr/local --sysconfdir=/etc --enable-legacy-pppd && \
+    make && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/build
+
+# Copy entrypoint script
+COPY scripts/vpn-entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Create shared directory
+RUN mkdir -p /shared
+
+WORKDIR /
+
+CMD ["/usr/local/bin/entrypoint.sh"]

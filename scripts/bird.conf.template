@@ -1,0 +1,48 @@
+# BIRD BGP Configuration for FortiVPN Gateway
+# This template is processed by bgp-entrypoint.sh
+
+log syslog all;
+debug protocols all;
+
+router id BGP_ROUTER_ID;
+
+# Define protocol for kernel routing table
+protocol kernel {
+    ipv4 {
+        import all;
+        export all;
+    };
+    learn;
+    scan time 20;
+}
+
+# Device protocol for interface monitoring
+protocol device {
+    scan time 10;
+}
+
+# Static routes (if any)
+protocol static {
+    ipv4;
+}
+
+# BGP protocol for peering with MikroTik
+protocol bgp mikrotik {
+    local as BGP_LOCAL_AS;
+    neighbor BGP_NEIGHBOR_IP as BGP_NEIGHBOR_AS;
+    
+    ipv4 {
+        import all;
+        export where proto = "vpn_routes";
+    };
+    
+    # Authentication (if configured)
+    # password "BGP_PASSWORD";
+}
+
+# Protocol for VPN routes
+protocol static vpn_routes {
+    ipv4;
+    # Routes learned from VPN will be added here dynamically
+    # Example: route VPN_NETWORK via VPN_GATEWAY;
+}

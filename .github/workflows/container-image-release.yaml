@@ -1,0 +1,32 @@
+name: Build Container Image on Release
+
+# This workflow is triggered when semantic-release creates a new release
+# It builds and pushes the Docker image with the release version tag
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., v1.0.0). If empty, defaults to latest tag.'
+        required: false
+        type: string
+      custom_tag:
+        description: 'Custom tag (e.g., feature-xyz, debug-latest). Overrides version input if specified.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.17
+    with:
+      image_name: deskbird-booking
+      platforms: linux/amd64,arm64
+      force_version: ${{ github.event.inputs.custom_tag || (github.event_name == 'release' && github.event.release.tag_name) || github.event.inputs.version }}
+    secrets: inherit
