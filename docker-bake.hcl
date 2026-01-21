@@ -42,7 +42,8 @@ target "cookie" {
     "org.opencontainers.image.description" = "FortiVPN Gateway - Cookie Authentication"
   }
   
-  cache-to   = ["type=inline"]
+  cache-from = ["type=registry,ref=${REGISTRY}/${IMAGE_NAME}-cookie:buildcache"]
+  cache-to   = ["type=registry,ref=${REGISTRY}/${IMAGE_NAME}-cookie:buildcache,mode=max", "type=inline"]
   output     = ["type=image,push=true"]
 }
 
@@ -65,7 +66,8 @@ target "vpn" {
     "org.opencontainers.image.description" = "FortiVPN Gateway - OpenFortiVPN Client"
   }
   
-  cache-to   = ["type=inline"]
+  cache-from = ["type=registry,ref=${REGISTRY}/${IMAGE_NAME}-vpn:buildcache"]
+  cache-to   = ["type=registry,ref=${REGISTRY}/${IMAGE_NAME}-vpn:buildcache,mode=max", "type=inline"]
   output     = ["type=image,push=true"]
 }
 
@@ -88,7 +90,8 @@ target "bgp" {
     "org.opencontainers.image.description" = "FortiVPN Gateway - BIRD BGP Daemon"
   }
   
-  cache-to   = ["type=inline"]
+  cache-from = ["type=registry,ref=${REGISTRY}/${IMAGE_NAME}-bgp:buildcache"]
+  cache-to   = ["type=registry,ref=${REGISTRY}/${IMAGE_NAME}-bgp:buildcache,mode=max", "type=inline"]
   output     = ["type=image,push=true"]
 }
 
