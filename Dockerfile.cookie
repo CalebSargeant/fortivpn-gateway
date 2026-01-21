@@ -27,7 +27,7 @@ RUN pip install --no-cache-dir selenium
 
 # Copy the script
 COPY cookie_auth.py /usr/local/bin/cookie_auth.py
-COPY scripts/cookie-entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY scripts/cookie-sidecar-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/cookie_auth.py /usr/local/bin/entrypoint.sh
 
 # Set environment defaults
