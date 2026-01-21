@@ -10,7 +10,7 @@ variable "REGISTRY" {
   default = "ghcr.io"
 }
 
-variable "IMAGE_NAME_PREFIX" {
+variable "IMAGE_NAME" {
   default = "calebsargeant/fortivpn-gateway"
 }
 
@@ -31,8 +31,8 @@ target "cookie" {
   platforms = split(",", PLATFORMS)
   
   tags = [
-    "${REGISTRY}/${IMAGE_NAME_PREFIX}-cookie:${VERSION}",
-    "${REGISTRY}/${IMAGE_NAME_PREFIX}-cookie:latest",
+    "${REGISTRY}/${IMAGE_NAME}-cookie:${VERSION}",
+    "${REGISTRY}/${IMAGE_NAME}-cookie:latest",
   ]
   
   labels = {
@@ -54,8 +54,8 @@ target "vpn" {
   platforms = split(",", PLATFORMS)
   
   tags = [
-    "${REGISTRY}/${IMAGE_NAME_PREFIX}-vpn:${VERSION}",
-    "${REGISTRY}/${IMAGE_NAME_PREFIX}-vpn:latest",
+    "${REGISTRY}/${IMAGE_NAME}-vpn:${VERSION}",
+    "${REGISTRY}/${IMAGE_NAME}-vpn:latest",
   ]
   
   labels = {
@@ -77,8 +77,8 @@ target "bgp" {
   platforms = split(",", PLATFORMS)
   
   tags = [
-    "${REGISTRY}/${IMAGE_NAME_PREFIX}-bgp:${VERSION}",
-    "${REGISTRY}/${IMAGE_NAME_PREFIX}-bgp:latest",
+    "${REGISTRY}/${IMAGE_NAME}-bgp:${VERSION}",
+    "${REGISTRY}/${IMAGE_NAME}-bgp:latest",
   ]
   
   labels = {
