@@ -189,21 +189,40 @@ def extract_cookie():
         
         # Step 6: Wait for redirect back to FortiVPN and extract cookie
         logger.info("Step 6: Waiting for authentication to complete")
-        WebDriverWait(driver, 60).until(
-            lambda d: VPN_GATEWAY in d.current_url
-        )
-        logger.info(f"Authentication successful! Redirected to: {driver.current_url}")
         
-        # Extract cookies
+        # Wait for redirect away from Microsoft (more flexible)
+        try:
+            WebDriverWait(driver, 60).until(
+                lambda d: "login.microsoftonline.com" not in d.current_url and "login.microsoft.com" not in d.current_url
+            )
+            logger.info(f"Left Microsoft auth page. Current URL: {driver.current_url}")
+            time.sleep(2)  # Give time for any additional redirects
+            driver.save_screenshot("/tmp/fortivpn_after_redirect.png")
+        except Exception as e:
+            logger.warning(f"Wait for redirect timed out or failed: {e}")
+        
+        # Try to navigate directly to the VPN gateway to pick up cookies
+        logger.info("Attempting to navigate to VPN gateway to collect cookies")
+        try:
+            driver.get(f"https://{VPN_GATEWAY}:{VPN_PORT}/")
+            time.sleep(3)
+            logger.info(f"Successfully navigated to VPN gateway. Current URL: {driver.current_url}")
+        except Exception as e:
+            logger.warning(f"Could not navigate to VPN gateway: {e}")
+        
+        driver.save_screenshot("/tmp/fortivpn_final.png")
+        
+        # Extract cookies from VPN domain
         cookies = driver.get_cookies()
-        logger.debug(f"Found {len(cookies)} cookies")
+        logger.info(f"Found {len(cookies)} cookies")
         
         # Find the SVPNCOOKIE (or similar session cookie)
         session_cookie = None
         for cookie in cookies:
-            logger.debug(f"Cookie: {cookie['name']} = {cookie['value'][:20]}...")
+            logger.debug(f"Cookie: {cookie['name']} = {cookie['value'][:20] if len(cookie['value']) > 20 else cookie['value']}...")
             if cookie['name'] in ['SVPNCOOKIE', 'APSCOOKIE', 'SVPNID']:
                 session_cookie = f"{cookie['name']}={cookie['value']}"
+                logger.info(f"Found session cookie: {cookie['name']}")
                 break
         
         if not session_cookie:
