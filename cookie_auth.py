@@ -8,7 +8,6 @@ import time
 import subprocess
 import logging
 import json
-from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -32,6 +31,7 @@ OP_ITEM_NAME = os.environ.get("OP_ITEM_NAME", "Microsoft")
 OP_VAULT = os.environ.get("OP_VAULT", "Private")
 COOKIE_FILE = os.environ.get("COOKIE_FILE", "/tmp/vpn_cookie.txt")
 REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL", "3600"))  # 1 hour default
+AUTH_TIMEOUT = int(os.environ.get("AUTH_TIMEOUT", "60"))  # Authentication timeout in seconds
 
 if not VPN_GATEWAY:
     logger.error("VPN_GATEWAY environment variable must be set")
@@ -161,6 +161,7 @@ def extract_cookie():
         time.sleep(3)
         driver.save_screenshot("/tmp/fortivpn_after_password.png")
         
+        otp_handled = False
         try:
             otp_input = driver.find_element(By.CSS_SELECTOR, "input[type='tel'], input[name='otc']")
             logger.info("OTP page detected, fetching code from 1Password")
@@ -174,33 +175,99 @@ def extract_cookie():
             )
             verify_button.click()
             logger.info("OTP submitted successfully")
+            otp_handled = True
             time.sleep(3)
-        except:
-            logger.debug("No OTP page found")
-        
-        # Handle "Stay signed in?" prompt
-        try:
-            yes_button = driver.find_element(By.XPATH, "//input[@type='submit' and @value='Yes']")
-            logger.info("Found 'Stay signed in?' prompt, clicking Yes")
-            yes_button.click()
-            time.sleep(2)
-        except:
-            logger.debug("No 'Stay signed in' prompt found")
-        
-        # Step 6: Wait for redirect back to FortiVPN and extract cookie
+        except Exception as otp_error:
+            logger.debug(f"No OTP page found or OTP handling failed: {otp_error}")
+            if "OTP page detected" in str(otp_error):
+                logger.error("OTP was detected but handling failed - check 1Password configuration")
+                raise
+
+        # Step 6: Wait for authentication to complete
         logger.info("Step 6: Waiting for authentication to complete")
-        
-        # Wait for redirect away from Microsoft (more flexible)
+
+        # Handle "Stay signed in?" prompt with multiple attempts
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                driver.save_screenshot(f"/tmp/fortivpn_prompt_check_{attempt}.png")
+                logger.debug(f"Current URL: {driver.current_url}")
+
+                # Check for "Stay signed in?" prompt
+                try:
+                    yes_button = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and (@value='Yes' or @id='idSIButton9')]"))
+                    )
+                    logger.info("Found 'Stay signed in?' prompt, clicking Yes")
+                    yes_button.click()
+                    time.sleep(3)
+                    break
+                except:
+                    logger.debug(f"No 'Stay signed in' prompt found (attempt {attempt + 1})")
+
+                # Check for "No" button and click it if "Yes" not found
+                try:
+                    no_button = WebDriverWait(driver, 2).until(
+                        EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and (@value='No' or @id='idBtn_Back')]"))
+                    )
+                    logger.info("Found 'Stay signed in?' prompt with No button, clicking No to proceed")
+                    no_button.click()
+                    time.sleep(3)
+                    break
+                except:
+                    logger.debug("No 'No' button found either")
+
+                # Check if we're already redirected away from Microsoft
+                if "login.microsoftonline.com" not in driver.current_url and "login.microsoft.com" not in driver.current_url:
+                    logger.info("Already redirected away from Microsoft")
+                    break
+
+                time.sleep(2)
+            except Exception as e:
+                logger.debug(f"Error checking for prompts: {e}")
+                if attempt == max_attempts - 1:
+                    logger.warning("Max attempts reached for prompt handling")
+
+        # Wait for redirect away from Microsoft (more flexible with better error handling)
+        redirect_successful = False
         try:
-            WebDriverWait(driver, 60).until(
+            logger.info(f"Waiting for redirect away from Microsoft authentication (timeout: {AUTH_TIMEOUT}s)...")
+            WebDriverWait(driver, AUTH_TIMEOUT).until(
                 lambda d: "login.microsoftonline.com" not in d.current_url and "login.microsoft.com" not in d.current_url
             )
-            logger.info(f"Left Microsoft auth page. Current URL: {driver.current_url}")
+            logger.info(f"✓ Left Microsoft auth page. Current URL: {driver.current_url}")
+            redirect_successful = True
             time.sleep(2)  # Give time for any additional redirects
             driver.save_screenshot("/tmp/fortivpn_after_redirect.png")
         except Exception as e:
-            logger.warning(f"Wait for redirect timed out or failed: {e}")
-        
+            logger.error(f"Wait for redirect timed out: {e}")
+            logger.info(f"Current URL when timeout occurred: {driver.current_url}")
+            driver.save_screenshot("/tmp/fortivpn_timeout.png")
+
+            # Check page source for clues
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+            logger.debug(f"Page text: {page_text[:500]}")
+
+            # If still on Microsoft page, try to find and click any remaining buttons
+            if "login.microsoftonline.com" in driver.current_url or "login.microsoft.com" in driver.current_url:
+                logger.info("Still on Microsoft page, checking for any remaining interactive elements...")
+                try:
+                    # Try to find any submit buttons
+                    submit_buttons = driver.find_elements(By.XPATH, "//input[@type='submit'] | //button[@type='submit']")
+                    if submit_buttons:
+                        logger.info(f"Found {len(submit_buttons)} submit button(s)")
+                        for idx, button in enumerate(submit_buttons):
+                            logger.info(f"Button {idx}: value='{button.get_attribute('value')}', id='{button.get_attribute('id')}'")
+                        # Click the first clickable button
+                        for button in submit_buttons:
+                            if button.is_displayed() and button.is_enabled():
+                                logger.info(f"Clicking button: {button.get_attribute('value') or button.get_attribute('id')}")
+                                button.click()
+                                time.sleep(5)
+                                break
+                except Exception as btn_e:
+                    logger.debug(f"Error finding/clicking buttons: {btn_e}")
+
         # Try to navigate directly to the VPN gateway to pick up cookies
         logger.info("Attempting to navigate to VPN gateway to collect cookies")
         try:
@@ -214,28 +281,53 @@ def extract_cookie():
         
         # Extract cookies from VPN domain
         cookies = driver.get_cookies()
-        logger.info(f"Found {len(cookies)} cookies")
-        
+        logger.info(f"Found {len(cookies)} total cookies from current domain")
+
+        # Log current domain for debugging
+        logger.info(f"Current domain: {driver.current_url}")
+
         # Find the SVPNCOOKIE (or similar session cookie)
         session_cookie = None
+        vpn_cookies = []
+
         for cookie in cookies:
             logger.debug(f"Cookie: {cookie['name']} = {cookie['value'][:20] if len(cookie['value']) > 20 else cookie['value']}...")
-            if cookie['name'] in ['SVPNCOOKIE', 'APSCOOKIE', 'SVPNID']:
-                session_cookie = f"{cookie['name']}={cookie['value']}"
-                logger.info(f"Found session cookie: {cookie['name']}")
-                break
-        
+            # Collect VPN-related cookies
+            if cookie['name'] in ['SVPNCOOKIE', 'APSCOOKIE', 'SVPNID', 'SVPNURL']:
+                vpn_cookies.append(cookie)
+                if cookie['name'] == 'SVPNCOOKIE':
+                    session_cookie = f"{cookie['name']}={cookie['value']}"
+                    logger.info(f"✓ Found primary session cookie: {cookie['name']}")
+
+        # If no SVPNCOOKIE, try other VPN cookies
+        if not session_cookie and vpn_cookies:
+            session_cookie = "; ".join([f"{c['name']}={c['value']}" for c in vpn_cookies])
+            logger.info(f"Using alternative VPN cookies: {', '.join([c['name'] for c in vpn_cookies])}")
+
         if not session_cookie:
-            # Fallback: use all cookies
-            logger.warning("Specific session cookie not found, using all cookies")
-            session_cookie = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
-        
+            # If no VPN-specific cookies found, this might indicate auth didn't complete
+            logger.error("No VPN session cookies found!")
+            logger.error("This usually means authentication did not complete successfully.")
+            logger.error("Check the screenshots in /tmp/ for more details:")
+            logger.error("  - /tmp/fortivpn_timeout.png (if timeout occurred)")
+            logger.error("  - /tmp/fortivpn_final.png (final state)")
+
+            # Still save whatever cookies we have for debugging
+            if cookies:
+                fallback_cookie = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
+                logger.warning(f"Saving all {len(cookies)} cookies as fallback")
+                with open(COOKIE_FILE, 'w') as f:
+                    f.write(fallback_cookie)
+
+            raise ValueError("No VPN session cookie found - authentication may have failed")
+
         # Save cookie to file
         logger.info(f"Saving cookie to {COOKIE_FILE}")
         with open(COOKIE_FILE, 'w') as f:
             f.write(session_cookie)
         
         logger.info("✓ Cookie extraction completed successfully!")
+        logger.info(f"Session cookie: {session_cookie[:50]}..." if len(session_cookie) > 50 else f"Session cookie: {session_cookie}")
         return session_cookie
         
     except Exception as e:

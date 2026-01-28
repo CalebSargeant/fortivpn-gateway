@@ -126,6 +126,7 @@ kubectl exec -n networking fortivpn-gateway-xxx -c bgp -- birdc show protocols
 | `VPN_GATEWAY` | Yes | - | FortiVPN gateway hostname |
 | `VPN_PORT` | No | `443` | FortiVPN gateway port |
 | `REFRESH_INTERVAL` | No | `3600` | Cookie refresh interval (seconds) |
+| `AUTH_TIMEOUT` | No | `60` | Authentication timeout (seconds) |
 
 #### VPN Container
 | Variable | Required | Default | Description |
