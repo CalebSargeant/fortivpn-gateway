@@ -133,6 +133,7 @@ kubectl exec -n networking fortivpn-gateway-xxx -c bgp -- birdc show protocols
 |----------|----------|---------|-------------|
 | `VPN_GATEWAY` | Yes | - | FortiVPN gateway hostname |
 | `VPN_PORT` | No | `443` | FortiVPN gateway port |
+| `TRUSTED_CERT` | No | - | Gateway certificate digest for validation (e.g., `pin-sha256:base64digest`) |
 
 #### BGP Container
 | Variable | Required | Default | Description |
@@ -195,6 +196,21 @@ add network=0.0.0.0/0  # Or specific networks
 - Check `/dev/ppp` exists in container
 - Verify cookie file exists in `/shared` volume
 - Check vpn container logs: `kubectl logs -n networking <pod> -c vpn`
+
+### Gateway Certificate Validation Failed
+If you see an error like:
+```
+ERROR: Gateway certificate validation failed, and the certificate digest is not in the local whitelist.
+ERROR:     trusted-cert = <certificate-digest>
+```
+
+1. Copy the certificate digest from the error message
+2. Add it to your secret configuration:
+```yaml
+TRUSTED_CERT: "pin-sha256:your-certificate-digest-here"
+```
+3. Update the secret: `kubectl apply -k k8s/overlays/prod`
+4. Restart the pod to apply changes
 
 ### BGP Not Peering
 - Verify MikroTik BGP configuration matches pod settings

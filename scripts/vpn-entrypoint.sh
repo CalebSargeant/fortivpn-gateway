@@ -6,6 +6,7 @@ echo "VPN Container Starting..."
 # Configuration
 VPN_GATEWAY="${VPN_GATEWAY}"
 VPN_PORT="${VPN_PORT:-443}"
+TRUSTED_CERT="${TRUSTED_CERT}"
 COOKIE_FILE="/shared/vpn_cookie.txt"
 CONFIG_FILE="/tmp/openfortivpn.conf"
 
@@ -25,6 +26,11 @@ set-routes = 1
 set-dns = 1
 pppd-use-peerdns = 1
 EOF
+
+# Add trusted cert if provided
+if [ -n "$TRUSTED_CERT" ]; then
+    echo "trusted-cert = ${TRUSTED_CERT}" >> "$CONFIG_FILE"
+fi
 
 # Wait for cookie file to be created
 echo "Waiting for cookie file ..."
