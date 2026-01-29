@@ -25,11 +25,31 @@ jobs:
       push: true
     secrets: inherit
 
-  promote:
+  promote-cookie:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
     uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.20
     with:
-      image_name: fortivpn-gateway
+      image_name: fortivpn-gateway-cookie
+      platforms: linux/amd64,linux/arm64
+      promote_pr_number: ${{ github.event.pull_request.number }}
+      push: true
+    secrets: inherit
+
+  promote-vpn:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.20
+    with:
+      image_name: fortivpn-gateway-vpn
+      platforms: linux/amd64,linux/arm64
+      promote_pr_number: ${{ github.event.pull_request.number }}
+      push: true
+    secrets: inherit
+
+  promote-bgp:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.20
+    with:
+      image_name: fortivpn-gateway-bgp
       platforms: linux/amd64,linux/arm64
       promote_pr_number: ${{ github.event.pull_request.number }}
       push: true
