@@ -2,11 +2,7 @@ name: Build Container Image
 
 # This workflow:
 # 1. Builds PR images on pull request events (tagged as pr-<number>)
-# 2. When semantic-release creates a release, builds and tags with the release version
-#
-# Note: We rebuild on release instead of promoting because docker-bake produces
-# multiple images (cookie, vpn, bgp) and the promote logic only handles single images.
-# Rebuilding is fast due to layer caching.
+# 2. When semantic-release creates a release, promotes PR images to the release version (no rebuild!)
 
 on:
   pull_request:
@@ -30,11 +26,41 @@ jobs:
       push: true
     secrets: inherit
 
-  release_build:
+  # Extract PR number from release commit
+  get_pr_number:
     if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.pr.outputs.number }}
+    steps:
+      - name: Get PR number from release
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.payload.release.target_commitish
+            });
+            const mergedPr = prs.find(pr => pr.merged_at);
+            if (mergedPr) {
+              core.setOutput('number', mergedPr.number);
+            } else {
+              core.setFailed('Could not find merged PR for this release');
+            }
+
+  # Promote each image using matrix strategy
+  promote:
+    if: github.event_name == 'release'
+    needs: [get_pr_number]
+    strategy:
+      matrix:
+        image_suffix: [cookie, vpn, bgp]
     uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.20
     with:
-      image_name: fortivpn-gateway
+      image_name: fortivpn-gateway-${{ matrix.image_suffix }}
       platforms: linux/amd64,linux/arm64
+      promote_pr_number: ${{ needs.get_pr_number.outputs.pr_number }}
       push: true
     secrets: inherit
