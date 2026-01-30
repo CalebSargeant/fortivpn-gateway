@@ -1,8 +1,12 @@
-name: Build Container Image on Release
+name: Build Container Image
 
 # This workflow:
 # 1. Builds PR images on pull request events (tagged as pr-<number>)
-# 2. When semantic-release creates a release, promotes the PR image to the release version (no rebuild!)
+# 2. When semantic-release creates a release, builds and tags with the release version
+#
+# Note: We rebuild on release instead of promoting because docker-bake produces
+# multiple images (cookie, vpn, bgp) and the promote logic only handles single images.
+# Rebuilding is fast due to layer caching.
 
 on:
   pull_request:
@@ -26,34 +30,11 @@ jobs:
       push: true
     secrets: inherit
 
-  # Extract PR number from release (for promotion)
-  get-pr-number:
+  release_build:
     if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    outputs:
-      pr_number: ${{ steps.pr.outputs.number }}
-    steps:
-      - name: Get PR number from release
-        id: pr
-        uses: actions/github-script@v7
-        with:
-          script: |
-            // Get the merge commit SHA from the release target
-            const { data: commits } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.payload.release.target_commitish
-            });
-            const pr = commits.find(c => c.merged_at);
-            core.setOutput('number', pr ? pr.number : '');
-
-  promote:
-    needs: [get-pr-number]
-    if: github.event_name == 'release' && needs.get-pr-number.outputs.pr_number != ''
     uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.20
     with:
       image_name: fortivpn-gateway
       platforms: linux/amd64,linux/arm64
-      promote_pr_number: ${{ needs.get-pr-number.outputs.pr_number }}
       push: true
     secrets: inherit
