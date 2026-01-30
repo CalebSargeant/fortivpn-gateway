@@ -93,6 +93,12 @@ spec:
               name: fortivpn-credentials
               key: VPN_PORT
               optional: true
+        - name: TRUSTED_CERT
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: TRUSTED_CERT
+              optional: true
         securityContext:
           privileged: true
           capabilities:

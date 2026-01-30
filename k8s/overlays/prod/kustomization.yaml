@@ -6,8 +6,8 @@ resources:
   - secret.enc.yaml
 images:
   - name: ghcr.io/calebsargeant/fortivpn-gateway-cookie
-    newTag: latest # {"$imagepolicy": "flux-system:fortivpn-gateway-cookie:tag"}
+    newTag: latest # {"$imagepolicy": "flux-system:cookie:tag"}
   - name: ghcr.io/calebsargeant/fortivpn-gateway-vpn
-    newTag: latest # {"$imagepolicy": "flux-system:fortivpn-gateway-vpn:tag"}
+    newTag: latest # {"$imagepolicy": "flux-system:vpn:tag"}
   - name: ghcr.io/calebsargeant/fortivpn-gateway-bgp
-    newTag: latest # {"$imagepolicy": "flux-system:fortivpn-gateway-bgp:tag"}
+    newTag: latest # {"$imagepolicy": "flux-system:bgp:tag"}
