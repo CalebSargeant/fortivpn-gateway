@@ -1,12 +1,15 @@
 name: Build Container Image on Release
 
-# This workflow is triggered when semantic-release creates a new release
-# It builds and pushes the Docker image with the release version tag
+# This workflow:
+# 1. Builds PR images on pull request events (tagged as pr-<number>)
+# 2. When semantic-release creates a release, promotes the PR image to the release version (no rebuild!)
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened]
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -15,7 +18,7 @@ permissions:
 
 jobs:
   pr_build:
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    if: github.event_name == 'pull_request'
     uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.20
     with:
       image_name: fortivpn-gateway
@@ -23,12 +26,34 @@ jobs:
       push: true
     secrets: inherit
 
+  # Extract PR number from release (for promotion)
+  get-pr-number:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.pr.outputs.number }}
+    steps:
+      - name: Get PR number from release
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get the merge commit SHA from the release target
+            const { data: commits } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.payload.release.target_commitish
+            });
+            const pr = commits.find(c => c.merged_at);
+            core.setOutput('number', pr ? pr.number : '');
+
   promote:
-    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    needs: [get-pr-number]
+    if: github.event_name == 'release' && needs.get-pr-number.outputs.pr_number != ''
     uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.20
     with:
       image_name: fortivpn-gateway
       platforms: linux/amd64,linux/arm64
-      promote_pr_number: ${{ github.event.pull_request.number }}
+      promote_pr_number: ${{ needs.get-pr-number.outputs.pr_number }}
       push: true
     secrets: inherit
