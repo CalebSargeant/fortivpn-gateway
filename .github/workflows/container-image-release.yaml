@@ -18,9 +18,10 @@ permissions:
 
 jobs:
   docker:
-    uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.22
+    uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.23
     with:
       image_name: fortivpn-gateway
-      platforms: linux/amd64,linux/arm64
+      platforms: linux/amd64
+      # platforms: linux/amd64,linux/arm64
       push: true
     secrets: inherit
