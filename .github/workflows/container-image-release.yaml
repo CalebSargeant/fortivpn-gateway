@@ -7,8 +7,6 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, closed]
-  push:
-    branches: [main]
 
 permissions:
   contents: read
@@ -32,14 +30,5 @@ jobs:
       image_name: fortivpn-gateway
       platforms: linux/amd64,linux/arm64
       promote_pr_number: ${{ github.event.pull_request.number }}
-      push: true
-    secrets: inherit
-
-  branch_build:
-    if: github.event_name == 'push' && !contains(github.event.head_commit.message, 'Merge pull request')
-    uses: calebsargeant/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@v1.0.20
-    with:
-      image_name: fortivpn-gateway
-      platforms: linux/amd64,linux/arm64
       push: true
     secrets: inherit
