@@ -7,6 +7,7 @@ echo "BGP Container Starting..."
 : ${BGP_LOCAL_AS:?"BGP_LOCAL_AS is required"}
 : ${BGP_NEIGHBOR_IP:?"BGP_NEIGHBOR_IP is required"}
 : ${BGP_NEIGHBOR_AS:?"BGP_NEIGHBOR_AS is required"}
+: ${VPN_GATEWAY:?"VPN_GATEWAY is required for route filtering"}
 
 # Auto-detect local IP address if not explicitly set
 # Try to find the IP that can reach the BGP neighbor
@@ -29,11 +30,15 @@ fi
 # Use local IP as router ID if not explicitly set
 BGP_ROUTER_ID=${BGP_ROUTER_ID:-${BGP_LOCAL_IP}}
 
+# Create /32 route for VPN gateway filtering
+VPN_GATEWAY_ROUTE="${VPN_GATEWAY}/32"
+
 echo "BGP Configuration:"
 echo "  Router ID: ${BGP_ROUTER_ID}"
 echo "  Local IP: ${BGP_LOCAL_IP}"
 echo "  Local AS: ${BGP_LOCAL_AS}"
 echo "  Neighbor: ${BGP_NEIGHBOR_IP} (AS ${BGP_NEIGHBOR_AS})"
+echo "  VPN Gateway (filtered): ${VPN_GATEWAY_ROUTE}"
 
 # Generate BIRD config from template
 sed -e "s/BGP_ROUTER_ID/${BGP_ROUTER_ID}/g" \
@@ -41,6 +46,7 @@ sed -e "s/BGP_ROUTER_ID/${BGP_ROUTER_ID}/g" \
     -e "s/BGP_LOCAL_AS/${BGP_LOCAL_AS}/g" \
     -e "s/BGP_NEIGHBOR_IP/${BGP_NEIGHBOR_IP}/g" \
     -e "s/BGP_NEIGHBOR_AS/${BGP_NEIGHBOR_AS}/g" \
+    -e "s|VPN_GATEWAY_ROUTE|${VPN_GATEWAY_ROUTE}|g" \
     /etc/bird/bird.conf.template > /etc/bird/bird.conf
 
 echo "Generated BIRD config:"
