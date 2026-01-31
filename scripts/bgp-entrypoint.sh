@@ -4,18 +4,40 @@ set -e
 echo "BGP Container Starting..."
 
 # Required environment variables
-: ${BGP_ROUTER_ID:?"BGP_ROUTER_ID is required"}
 : ${BGP_LOCAL_AS:?"BGP_LOCAL_AS is required"}
 : ${BGP_NEIGHBOR_IP:?"BGP_NEIGHBOR_IP is required"}
 : ${BGP_NEIGHBOR_AS:?"BGP_NEIGHBOR_AS is required"}
 
+# Auto-detect local IP address if not explicitly set
+# Try to find the IP that can reach the BGP neighbor
+if [ -z "${BGP_LOCAL_IP}" ]; then
+    echo "Auto-detecting local IP address..."
+    # Get the source IP that would be used to reach the BGP neighbor
+    BGP_LOCAL_IP=$(ip route get ${BGP_NEIGHBOR_IP} 2>/dev/null | grep -oP 'src \K\S+' || true)
+
+    if [ -z "${BGP_LOCAL_IP}" ]; then
+        # Fallback: get the first non-loopback IPv4 address
+        BGP_LOCAL_IP=$(ip -4 addr show scope global | grep -oP 'inet \K[\d.]+' | head -1)
+    fi
+
+    if [ -z "${BGP_LOCAL_IP}" ]; then
+        echo "ERROR: Could not determine local IP address"
+        exit 1
+    fi
+fi
+
+# Use local IP as router ID if not explicitly set
+BGP_ROUTER_ID=${BGP_ROUTER_ID:-${BGP_LOCAL_IP}}
+
 echo "BGP Configuration:"
 echo "  Router ID: ${BGP_ROUTER_ID}"
+echo "  Local IP: ${BGP_LOCAL_IP}"
 echo "  Local AS: ${BGP_LOCAL_AS}"
 echo "  Neighbor: ${BGP_NEIGHBOR_IP} (AS ${BGP_NEIGHBOR_AS})"
 
 # Generate BIRD config from template
 sed -e "s/BGP_ROUTER_ID/${BGP_ROUTER_ID}/g" \
+    -e "s/BGP_LOCAL_IP/${BGP_LOCAL_IP}/g" \
     -e "s/BGP_LOCAL_AS/${BGP_LOCAL_AS}/g" \
     -e "s/BGP_NEIGHBOR_IP/${BGP_NEIGHBOR_IP}/g" \
     -e "s/BGP_NEIGHBOR_AS/${BGP_NEIGHBOR_AS}/g" \

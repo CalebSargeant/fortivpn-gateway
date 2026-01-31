@@ -128,6 +128,7 @@ spec:
             secretKeyRef:
               name: fortivpn-credentials
               key: BGP_ROUTER_ID
+              optional: true  # Auto-detected from node IP if not set
         - name: BGP_LOCAL_AS
           valueFrom:
             secretKeyRef:
