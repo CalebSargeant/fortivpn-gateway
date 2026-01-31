@@ -63,7 +63,7 @@ spec:
         - name: CONTINUOUS_REFRESH
           value: "true"
         - name: REFRESH_INTERVAL
-          value: "3600"  # Refresh every hour
+          value: "21600"  # Proactive refresh every 6 hours (also refreshes on-demand when VPN requests)
         resources:
           requests:
             memory: "512Mi"
@@ -144,6 +144,11 @@ spec:
             secretKeyRef:
               name: fortivpn-credentials
               key: BGP_NEIGHBOR_AS
+        - name: VPN_GATEWAY
+          valueFrom:
+            secretKeyRef:
+              name: fortivpn-credentials
+              key: VPN_GATEWAY
         securityContext:
           privileged: true
           capabilities:

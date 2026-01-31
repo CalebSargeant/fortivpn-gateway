@@ -29,9 +29,10 @@ VPN_GATEWAY = os.environ.get("VPN_GATEWAY")
 VPN_PORT = os.environ.get("VPN_PORT", "443")
 OP_ITEM_NAME = os.environ.get("OP_ITEM_NAME", "Microsoft")
 OP_VAULT = os.environ.get("OP_VAULT", "Private")
-COOKIE_FILE = os.environ.get("COOKIE_FILE", "/tmp/vpn_cookie.txt")
-REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL", "3600"))  # 1 hour default
+COOKIE_FILE = os.environ.get("COOKIE_FILE", "/shared/vpn_cookie.txt")
+REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL", "21600"))  # 6 hours default
 AUTH_TIMEOUT = int(os.environ.get("AUTH_TIMEOUT", "60"))  # Authentication timeout in seconds
+WATCH_INTERVAL = int(os.environ.get("WATCH_INTERVAL", "5"))  # Check for cookie deletion every 5 seconds
 
 if not VPN_GATEWAY:
     logger.error("VPN_GATEWAY environment variable must be set")
@@ -346,25 +347,51 @@ def extract_cookie():
             logger.debug("Browser already closed")
 
 def cookie_refresh_loop():
-    """Continuously refresh the cookie before expiration"""
+    """Continuously refresh the cookie before expiration or when deleted"""
     logger.info("Starting cookie refresh loop")
     logger.info(f"Refresh interval: {REFRESH_INTERVAL} seconds")
-    
+    logger.info(f"Watch interval: {WATCH_INTERVAL} seconds (checks for cookie deletion)")
+
     while True:
         try:
-            extract_cookie()
-            logger.info(f"Next refresh in {REFRESH_INTERVAL} seconds")
-            time.sleep(REFRESH_INTERVAL)
+            # Extract cookie if it doesn't exist
+            if not os.path.exists(COOKIE_FILE):
+                logger.info("Cookie file not found, extracting new cookie...")
+                extract_cookie()
+
+            # Wait for next refresh, but check periodically if cookie was deleted
+            elapsed = 0
+            while elapsed < REFRESH_INTERVAL:
+                time.sleep(WATCH_INTERVAL)
+                elapsed += WATCH_INTERVAL
+
+                # If cookie file was deleted (VPN requested re-auth), break immediately
+                if not os.path.exists(COOKIE_FILE):
+                    logger.info("Cookie file deleted - VPN requested re-authentication")
+                    break
+
+            # If we completed the full interval, do a proactive refresh
+            if elapsed >= REFRESH_INTERVAL:
+                logger.info(f"Refresh interval reached ({REFRESH_INTERVAL}s), refreshing cookie...")
+                # Delete old cookie and extract new one
+                if os.path.exists(COOKIE_FILE):
+                    os.remove(COOKIE_FILE)
+                extract_cookie()
+
         except Exception as e:
             logger.error(f"Cookie extraction failed: {str(e)}")
             logger.info("Retrying in 60 seconds...")
             time.sleep(60)
 
 if __name__ == "__main__":
-    # Run initial extraction
-    extract_cookie()
-    
-    # If REFRESH_INTERVAL is set, run continuous refresh loop
+    # Run initial extraction only if cookie doesn't exist
+    if not os.path.exists(COOKIE_FILE):
+        logger.info("No existing cookie found, performing initial extraction...")
+        extract_cookie()
+    else:
+        logger.info(f"Existing cookie found at {COOKIE_FILE}, skipping initial extraction")
+
+    # If CONTINUOUS_REFRESH is set, run continuous refresh loop
     if os.environ.get("CONTINUOUS_REFRESH", "false").lower() == "true":
         cookie_refresh_loop()
     else:
