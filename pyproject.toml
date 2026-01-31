@@ -1,5 +1,5 @@
 [tool.semantic_release]
-version = "1.1.0"
+version = "1.2.0"
 version_toml = ["pyproject.toml:tool.semantic_release.version"]
 version_variables = []
 build_command = ""
