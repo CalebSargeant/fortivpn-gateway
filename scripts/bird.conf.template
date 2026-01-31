@@ -41,8 +41,15 @@ filter bgp_export_filter {
     # Block local LAN
     if net = 192.168.19.0/24 then reject;
 
+    # Block Kubernetes/Flannel networks (10.42.x.x, 10.43.x.x)
+    if net ~ 10.42.0.0/16 then reject;
+    if net ~ 10.43.0.0/16 then reject;
+
+    # Block link-local
+    if net ~ 169.254.0.0/16 then reject;
+
     # Block VPN gateway host route
-    if net = VPN_GATEWAY_ROUTE then reject;
+    if net = VPN_GATEWAY_IP/32 then reject;
 
     # Accept everything else (VPN routes)
     accept;
