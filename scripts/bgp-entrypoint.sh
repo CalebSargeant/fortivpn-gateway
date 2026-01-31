@@ -30,15 +30,24 @@ fi
 # Use local IP as router ID if not explicitly set
 BGP_ROUTER_ID=${BGP_ROUTER_ID:-${BGP_LOCAL_IP}}
 
-# Create /32 route for VPN gateway filtering
-VPN_GATEWAY_ROUTE="${VPN_GATEWAY}/32"
+# Resolve VPN gateway to IP address (in case it's a hostname)
+if echo "${VPN_GATEWAY}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    VPN_GATEWAY_IP="${VPN_GATEWAY}"
+else
+    echo "Resolving VPN gateway hostname: ${VPN_GATEWAY}"
+    VPN_GATEWAY_IP=$(getent hosts "${VPN_GATEWAY}" 2>/dev/null | awk '{print $1}' | head -1)
+    if [ -z "${VPN_GATEWAY_IP}" ]; then
+        echo "WARNING: Could not resolve VPN gateway hostname, using 0.0.0.0 as placeholder"
+        VPN_GATEWAY_IP="0.0.0.1"  # Dummy IP that won't match anything
+    fi
+fi
 
 echo "BGP Configuration:"
 echo "  Router ID: ${BGP_ROUTER_ID}"
 echo "  Local IP: ${BGP_LOCAL_IP}"
 echo "  Local AS: ${BGP_LOCAL_AS}"
 echo "  Neighbor: ${BGP_NEIGHBOR_IP} (AS ${BGP_NEIGHBOR_AS})"
-echo "  VPN Gateway (filtered): ${VPN_GATEWAY_ROUTE}"
+echo "  VPN Gateway IP (filtered): ${VPN_GATEWAY_IP}"
 
 # Generate BIRD config from template
 sed -e "s/BGP_ROUTER_ID/${BGP_ROUTER_ID}/g" \
@@ -46,7 +55,7 @@ sed -e "s/BGP_ROUTER_ID/${BGP_ROUTER_ID}/g" \
     -e "s/BGP_LOCAL_AS/${BGP_LOCAL_AS}/g" \
     -e "s/BGP_NEIGHBOR_IP/${BGP_NEIGHBOR_IP}/g" \
     -e "s/BGP_NEIGHBOR_AS/${BGP_NEIGHBOR_AS}/g" \
-    -e "s|VPN_GATEWAY_ROUTE|${VPN_GATEWAY_ROUTE}|g" \
+    -e "s/VPN_GATEWAY_IP/${VPN_GATEWAY_IP}/g" \
     /etc/bird/bird.conf.template > /etc/bird/bird.conf
 
 echo "Generated BIRD config:"
