@@ -35,7 +35,7 @@ protocol static {
 
 # BGP protocol for peering with MikroTik
 protocol bgp mikrotik {
-    local BGP_ROUTER_ID as BGP_LOCAL_AS;
+    local BGP_LOCAL_IP as BGP_LOCAL_AS;
     neighbor BGP_NEIGHBOR_IP as BGP_NEIGHBOR_AS;
     
     # Connection settings
