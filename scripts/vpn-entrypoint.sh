@@ -50,9 +50,53 @@ wait_for_cookie() {
     echo "Cookie file found!"
 }
 
+# Setup NAT/masquerading for VPN traffic
+setup_nat() {
+    echo "Setting up NAT/masquerading for VPN traffic..."
+    
+    # Wait for VPN interface to be up
+    local max_wait=30
+    local count=0
+    while [ $count -lt $max_wait ]; do
+        if ip link show ppp0 2>/dev/null | grep -q "UP"; then
+            echo "VPN interface ppp0 is up"
+            break
+        elif ip link show tun0 2>/dev/null | grep -q "UP"; then
+            echo "VPN interface tun0 is up"
+            break
+        fi
+        sleep 1
+        count=$((count + 1))
+    done
+    
+    # Enable IP forwarding
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    echo "IP forwarding enabled"
+    
+    # Add masquerading rules for VPN interfaces
+    # This allows return traffic to work properly
+    if ip link show ppp0 2>/dev/null | grep -q "UP"; then
+        iptables -t nat -A POSTROUTING -o ppp0 -j MASQUERADE
+        echo "Added masquerading rule for ppp0"
+    fi
+    
+    if ip link show tun0 2>/dev/null | grep -q "UP"; then
+        iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+        echo "Added masquerading rule for tun0"
+    fi
+    
+    # Show current NAT rules
+    echo "Current NAT rules:"
+    iptables -t nat -L POSTROUTING -n -v
+}
+
 # Connect to VPN
 connect_vpn() {
     echo "Starting OpenFortiVPN..."
+    
+    # Setup NAT in background after a short delay to allow VPN to establish
+    (sleep 5 && setup_nat) &
+    
     cat "$COOKIE_FILE" | openfortivpn --cookie-on-stdin -c "$CONFIG_FILE"
     return $?
 }
