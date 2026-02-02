@@ -61,7 +61,7 @@ get_active_vpn_interface() {
     # Check for any ppp interface that is UP (ppp0, ppp1, ppp2, etc.)
     # Use 'ip link show up' to list only UP interfaces, then filter for ppp
     # Example matching line: "3: ppp1: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP>"
-    local ppp_interface=$(ip link show up | awk '/^[0-9]+: ppp[0-9]+:/ {match($2, /ppp[0-9]+/, arr); print arr[0]; exit}')
+    local ppp_interface=$(ip link show up | awk '/^[0-9]+: ppp[0-9]+:/ {sub(/:/, "", $2); print $2; exit}')
     if [ -n "$ppp_interface" ]; then
         echo "$ppp_interface"
         return 0
