@@ -17,6 +17,12 @@ MAX_RETRIES=0         # 0 = infinite retries
 RETRY_COUNT=0
 CURRENT_BACKOFF=$MIN_BACKOFF
 
+# VPN interface wait timeout (in seconds)
+VPN_INTERFACE_WAIT_TIMEOUT=30
+
+# NAT setup tracking flag
+NAT_CONFIGURED=false
+
 # Validate required environment variables
 if [ -z "$VPN_GATEWAY" ]; then
     echo "ERROR: VPN_GATEWAY environment variable is required"
@@ -50,9 +56,76 @@ wait_for_cookie() {
     echo "Cookie file found!"
 }
 
+# Detect active VPN interface
+get_active_vpn_interface() {
+    if ip link show ppp0 2>/dev/null | grep -q "UP"; then
+        echo "ppp0"
+        return 0
+    elif ip link show tun0 2>/dev/null | grep -q "UP"; then
+        echo "tun0"
+        return 0
+    fi
+    return 1
+}
+
+# Setup NAT/masquerading for VPN traffic
+setup_nat() {
+    # Check if NAT has already been configured
+    if [ "$NAT_CONFIGURED" = true ]; then
+        echo "NAT already configured, skipping setup"
+        return 0
+    fi
+    
+    echo "Setting up NAT/masquerading for VPN traffic..."
+    
+    # Wait for VPN interface to be up
+    local count=0
+    local vpn_interface=""
+    
+    while [ $count -lt $VPN_INTERFACE_WAIT_TIMEOUT ]; do
+        vpn_interface=$(get_active_vpn_interface)
+        if [ $? -eq 0 ]; then
+            echo "VPN interface $vpn_interface is up"
+            break
+        fi
+        sleep 1
+        count=$((count + 1))
+    done
+    
+    if [ -z "$vpn_interface" ]; then
+        echo "ERROR: VPN interface did not come up within ${VPN_INTERFACE_WAIT_TIMEOUT} seconds"
+        return 1
+    fi
+    
+    # Enable IP forwarding
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    echo "IP forwarding enabled"
+    
+    # Check if masquerading rule already exists for this interface
+    if iptables -t nat -C POSTROUTING -o "$vpn_interface" -j MASQUERADE 2>/dev/null; then
+        echo "Masquerading rule for $vpn_interface already exists"
+    else
+        # Add masquerading rule for the active VPN interface
+        # This allows return traffic to work properly
+        iptables -t nat -A POSTROUTING -o "$vpn_interface" -j MASQUERADE
+        echo "Added masquerading rule for $vpn_interface"
+    fi
+    
+    # Mark NAT as configured
+    NAT_CONFIGURED=true
+    
+    # Show current NAT rules
+    echo "Current NAT rules:"
+    iptables -t nat -L POSTROUTING -n -v
+}
+
 # Connect to VPN
 connect_vpn() {
     echo "Starting OpenFortiVPN..."
+    
+    # Setup NAT in background to run once VPN is established
+    setup_nat &
+    
     cat "$COOKIE_FILE" | openfortivpn --cookie-on-stdin -c "$CONFIG_FILE"
     return $?
 }
