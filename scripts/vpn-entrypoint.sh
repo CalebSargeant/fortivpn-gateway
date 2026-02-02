@@ -20,6 +20,9 @@ CURRENT_BACKOFF=$MIN_BACKOFF
 # VPN interface wait timeout (in seconds)
 VPN_INTERFACE_WAIT_TIMEOUT=30
 
+# NAT setup tracking flag
+NAT_CONFIGURED=false
+
 # Validate required environment variables
 if [ -z "$VPN_GATEWAY" ]; then
     echo "ERROR: VPN_GATEWAY environment variable is required"
@@ -67,6 +70,12 @@ get_active_vpn_interface() {
 
 # Setup NAT/masquerading for VPN traffic
 setup_nat() {
+    # Check if NAT has already been configured
+    if [ "$NAT_CONFIGURED" = true ]; then
+        echo "NAT already configured, skipping setup"
+        return 0
+    fi
+    
     echo "Setting up NAT/masquerading for VPN traffic..."
     
     # Wait for VPN interface to be up
@@ -92,10 +101,18 @@ setup_nat() {
     echo 1 > /proc/sys/net/ipv4/ip_forward
     echo "IP forwarding enabled"
     
-    # Add masquerading rule for the active VPN interface
-    # This allows return traffic to work properly
-    iptables -t nat -A POSTROUTING -o "$vpn_interface" -j MASQUERADE
-    echo "Added masquerading rule for $vpn_interface"
+    # Check if masquerading rule already exists for this interface
+    if iptables -t nat -C POSTROUTING -o "$vpn_interface" -j MASQUERADE 2>/dev/null; then
+        echo "Masquerading rule for $vpn_interface already exists"
+    else
+        # Add masquerading rule for the active VPN interface
+        # This allows return traffic to work properly
+        iptables -t nat -A POSTROUTING -o "$vpn_interface" -j MASQUERADE
+        echo "Added masquerading rule for $vpn_interface"
+    fi
+    
+    # Mark NAT as configured
+    NAT_CONFIGURED=true
     
     # Show current NAT rules
     echo "Current NAT rules:"
