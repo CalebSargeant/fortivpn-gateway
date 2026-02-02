@@ -58,10 +58,17 @@ wait_for_cookie() {
 
 # Detect active VPN interface
 get_active_vpn_interface() {
-    if ip link show ppp0 2>/dev/null | grep -q "UP"; then
-        echo "ppp0"
+    # Check for any ppp interface that is UP (ppp0, ppp1, ppp2, etc.)
+    # Use 'ip link show up' to list only UP interfaces, then filter for ppp
+    # Example matching line: "3: ppp1: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP>"
+    local ppp_interface=$(ip link show up | awk '/^[0-9]+: ppp[0-9]+:/ {sub(/:/, "", $2); print $2; exit}')
+    if [ -n "$ppp_interface" ]; then
+        echo "$ppp_interface"
         return 0
-    elif ip link show tun0 2>/dev/null | grep -q "UP"; then
+    fi
+    
+    # Fallback to tun0 if no ppp interface found
+    if ip link show tun0 2>/dev/null | grep -q "UP"; then
         echo "tun0"
         return 0
     fi
@@ -114,9 +121,9 @@ setup_nat() {
     # Mark NAT as configured
     NAT_CONFIGURED=true
     
-    # Show current NAT rules
+    # Show current NAT rules (suppress warning about legacy tables)
     echo "Current NAT rules:"
-    iptables -t nat -L POSTROUTING -n -v
+    iptables -t nat -L POSTROUTING -n -v 2>/dev/null
 }
 
 # Connect to VPN
