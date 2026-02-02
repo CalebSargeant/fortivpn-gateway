@@ -59,8 +59,9 @@ wait_for_cookie() {
 # Detect active VPN interface
 get_active_vpn_interface() {
     # Check for any ppp interface that is UP (ppp0, ppp1, ppp2, etc.)
-    local ppp_interface=$(ip link show | grep -oP 'ppp[0-9]+' | head -n 1)
-    if [ -n "$ppp_interface" ] && ip link show "$ppp_interface" 2>/dev/null | grep -q "UP"; then
+    # List all interfaces and filter for UP ppp interfaces
+    local ppp_interface=$(ip link show | awk '/ppp[0-9]+.*UP/ {match($0, /ppp[0-9]+/, arr); print arr[0]; exit}')
+    if [ -n "$ppp_interface" ]; then
         echo "$ppp_interface"
         return 0
     fi
@@ -121,7 +122,7 @@ setup_nat() {
     
     # Show current NAT rules
     echo "Current NAT rules:"
-    iptables -t nat -L POSTROUTING -n -v 2>&1 | grep -v "iptables-legacy"
+    iptables -t nat -L POSTROUTING -n -v 2>&1 | grep -v "^# Warning: iptables-legacy tables present"
 }
 
 # Connect to VPN
