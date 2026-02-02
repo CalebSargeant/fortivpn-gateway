@@ -121,7 +121,7 @@ setup_nat() {
     
     # Show current NAT rules
     echo "Current NAT rules:"
-    iptables -t nat -L POSTROUTING -n -v
+    iptables -t nat -L POSTROUTING -n -v 2>&1 | grep -v "iptables-legacy"
 }
 
 # Connect to VPN
