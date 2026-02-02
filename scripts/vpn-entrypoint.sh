@@ -59,9 +59,9 @@ wait_for_cookie() {
 # Detect active VPN interface
 get_active_vpn_interface() {
     # Check for any ppp interface that is UP (ppp0, ppp1, ppp2, etc.)
-    # List all interfaces and filter for UP ppp interfaces
-    # The pattern looks for ppp[0-9]+ followed by angle brackets containing UP flag
-    local ppp_interface=$(ip link show | awk '/ppp[0-9]+:.*<.*UP.*>/ {match($0, /ppp[0-9]+/, arr); print arr[0]; exit}')
+    # Use 'ip link show up' to list only UP interfaces, then filter for ppp
+    # Example matching line: "3: ppp1: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP>"
+    local ppp_interface=$(ip link show up | awk '/^[0-9]+: ppp[0-9]+:/ {match($2, /ppp[0-9]+/, arr); print arr[0]; exit}')
     if [ -n "$ppp_interface" ]; then
         echo "$ppp_interface"
         return 0
