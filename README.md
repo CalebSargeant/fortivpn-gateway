@@ -113,6 +113,35 @@ kubectl logs -n networking fortivpn-gateway-xxx -c bgp
 kubectl exec -n networking fortivpn-gateway-xxx -c bgp -- birdc show protocols
 ```
 
+## Local End-to-End Validation
+
+This repository now includes a repeatable local E2E validator for the running Kubernetes deployment:
+
+```bash
+scripts/e2e-local-k8s.sh
+```
+
+The script validates the full flow:
+- Cookie container successfully extracts VPN session cookie
+- VPN container establishes tunnel
+- BGP container reaches a healthy protocol state
+
+### E2E validator options
+
+```bash
+# Optional environment overrides
+NAMESPACE=networking \
+APP_LABEL=app=fortivpn-gateway \
+WAIT_TIMEOUT_SECONDS=180 \
+TAIL_LINES=300 \
+scripts/e2e-local-k8s.sh
+```
+
+### Exit behavior
+
+- Exit code `0`: end-to-end flow appears healthy
+- Exit code `1`: one or more stages failed; logs and next-step diagnostics are printed
+
 ## Configuration
 
 ### Environment Variables

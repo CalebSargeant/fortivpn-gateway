@@ -8,6 +8,7 @@ import time
 import subprocess
 import logging
 import json
+from urllib.parse import urlparse, parse_qs, quote
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -33,6 +34,7 @@ COOKIE_FILE = os.environ.get("COOKIE_FILE", "/shared/vpn_cookie.txt")
 REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL", "21600"))  # 6 hours default
 AUTH_TIMEOUT = int(os.environ.get("AUTH_TIMEOUT", "60"))  # Authentication timeout in seconds
 WATCH_INTERVAL = int(os.environ.get("WATCH_INTERVAL", "5"))  # Check for cookie deletion every 5 seconds
+COOKIE_WAIT_SECONDS = int(os.environ.get("COOKIE_WAIT_SECONDS", "20"))  # Wait for FortiGate cookies after auth
 
 if not VPN_GATEWAY:
     logger.error("VPN_GATEWAY environment variable must be set")
@@ -265,9 +267,34 @@ def extract_cookie():
                                 logger.info(f"Clicking button: {button.get_attribute('value') or button.get_attribute('id')}")
                                 button.click()
                                 time.sleep(5)
+                                try:
+                                    logger.info("Clicked fallback submit button; waiting for Microsoft redirect to complete")
+                                    WebDriverWait(driver, 20).until(
+                                        lambda d: "login.microsoftonline.com" not in d.current_url and "login.microsoft.com" not in d.current_url
+                                    )
+                                    logger.info(f"✓ Left Microsoft auth page after fallback click. Current URL: {driver.current_url}")
+                                    driver.save_screenshot("/tmp/fortivpn_after_fallback_redirect.png")
+                                except Exception as fallback_wait_error:
+                                    logger.warning(f"Fallback redirect wait timed out: {fallback_wait_error}")
                                 break
                 except Exception as btn_e:
                     logger.debug(f"Error finding/clicking buttons: {btn_e}")
+        # If callback lands on localhost, complete FortiGate SAML id exchange manually
+        if "127.0.0.1:8020" in driver.current_url:
+            logger.info(f"SAML callback landed on local endpoint: {driver.current_url}")
+            driver.save_screenshot("/tmp/fortivpn_local_callback.png")
+            parsed = urlparse(driver.current_url)
+            callback_id = parse_qs(parsed.query).get("id", [None])[0]
+            if not callback_id:
+                raise ValueError("SAML callback redirected to localhost without id parameter")
+
+            logger.info("Found SAML callback id; exchanging it at FortiGate /remote/saml/auth_id endpoint")
+            auth_id_url = f"https://{VPN_GATEWAY}:{VPN_PORT}/remote/saml/auth_id?id={quote(callback_id, safe='')}"
+            logger.debug(f"Navigating to auth_id URL: {auth_id_url}")
+            driver.get(auth_id_url)
+            time.sleep(3)
+            driver.save_screenshot("/tmp/fortivpn_after_auth_id.png")
+            logger.info(f"Post-auth_id URL: {driver.current_url}")
 
         # Try to navigate directly to the VPN gateway to pick up cookies
         logger.info("Attempting to navigate to VPN gateway to collect cookies")
@@ -279,23 +306,31 @@ def extract_cookie():
             logger.warning(f"Could not navigate to VPN gateway: {e}")
         
         driver.save_screenshot("/tmp/fortivpn_final.png")
-        
-        # Extract cookies from VPN domain
-        cookies = driver.get_cookies()
-        logger.info(f"Found {len(cookies)} total cookies from current domain")
+ 
+        # Wait briefly for VPN cookies to be set after final redirects
+        expected_cookie_names = {'SVPNCOOKIE', 'APSCOOKIE', 'SVPNID', 'SVPNURL'}
+        cookies = []
+        vpn_cookies = []
+        cookie_wait_start = time.time()
+        logger.info(f"Waiting up to {COOKIE_WAIT_SECONDS}s for FortiGate session cookies")
+        while time.time() - cookie_wait_start < COOKIE_WAIT_SECONDS:
+            cookies = driver.get_cookies()
+            vpn_cookies = [c for c in cookies if c.get('name') in expected_cookie_names]
+            if vpn_cookies:
+                break
+            logger.debug(f"No VPN cookies yet. Current URL: {driver.current_url}; total cookies: {len(cookies)}")
+            time.sleep(1)
 
-        # Log current domain for debugging
+        logger.info(f"Found {len(cookies)} total cookies from current domain")
         logger.info(f"Current domain: {driver.current_url}")
 
         # Find the SVPNCOOKIE (or similar session cookie)
         session_cookie = None
-        vpn_cookies = []
 
         for cookie in cookies:
             logger.debug(f"Cookie: {cookie['name']} = {cookie['value'][:20] if len(cookie['value']) > 20 else cookie['value']}...")
             # Collect VPN-related cookies
-            if cookie['name'] in ['SVPNCOOKIE', 'APSCOOKIE', 'SVPNID', 'SVPNURL']:
-                vpn_cookies.append(cookie)
+            if cookie['name'] in expected_cookie_names:
                 if cookie['name'] == 'SVPNCOOKIE':
                     session_cookie = f"{cookie['name']}={cookie['value']}"
                     logger.info(f"✓ Found primary session cookie: {cookie['name']}")
@@ -309,6 +344,7 @@ def extract_cookie():
             # If no VPN-specific cookies found, this might indicate auth didn't complete
             logger.error("No VPN session cookies found!")
             logger.error("This usually means authentication did not complete successfully.")
+            logger.error(f"Final URL: {driver.current_url}")
             logger.error("Check the screenshots in /tmp/ for more details:")
             logger.error("  - /tmp/fortivpn_timeout.png (if timeout occurred)")
             logger.error("  - /tmp/fortivpn_final.png (final state)")

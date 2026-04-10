@@ -1,0 +1,424 @@
+name: Reusable Docker Bake to GHCR
+
+# Workflow Strategy:
+#   PR opened/updated -> CI builds & pushes pr-<number> image
+#   PR merged -> Semantic Release creates release
+#   Release published -> Promotes pr-<number> image to release version (no rebuild!)
+#
+# Example caller workflow:
+#
+#   name: Docker Build
+#   on:
+#     pull_request:
+#     release:
+#       types: [published]
+#
+#   jobs:
+#     # Extract PR number from release (for promotion)
+#     get-pr-number:
+#       if: github.event_name == 'release'
+#       runs-on: ubuntu-latest
+#       outputs:
+#         pr_number: ${{ steps.pr.outputs.number }}
+#       steps:
+#         - name: Get PR number from release
+#           id: pr
+#           uses: actions/github-script@v7
+#           with:
+#             script: |
+#               // Get the merge commit SHA from the release target
+#               const { data: commits } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+#                 owner: context.repo.owner,
+#                 repo: context.repo.repo,
+#                 commit_sha: context.payload.release.target_commitish
+#               });
+#               const pr = commits.find(c => c.merged_at);
+#               core.setOutput('number', pr ? pr.number : '');
+#
+#     docker:
+#       needs: [get-pr-number]
+#       if: always() && (github.event_name == 'pull_request' || needs.get-pr-number.outputs.pr_number != '')
+#       uses: your-org/reusable-workflows/.github/workflows/docker-bake-ghcr.yaml@main
+#       with:
+#         bake_target: my-app
+#         # For releases: promote the PR image instead of rebuilding
+#         promote_pr_number: ${{ needs.get-pr-number.outputs.pr_number || '' }}
+
+on:
+  workflow_call:
+    inputs:
+      bake_file:
+        description: 'Path to docker-bake file'
+        required: false
+        type: string
+        default: 'docker-bake.hcl'
+      bake_target:
+        description: 'Docker Bake target to build'
+        required: false
+        type: string
+        default: 'default'
+      push_target:
+        description: 'Docker Bake target for push (if different from build target)'
+        required: false
+        type: string
+        default: ''
+      image_name:
+        description: 'Docker image name (without registry/org prefix). Defaults to bake_target if not specified.'
+        required: false
+        type: string
+        default: ''
+      platforms:
+        description: 'Target platforms (comma-separated)'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
+      push:
+        description: 'Push images to registry'
+        required: false
+        type: boolean
+        default: true
+      promote_pr_number:
+        description: 'PR number to promote. When set, skips build and re-tags pr-<number> image with the release version.'
+        required: false
+        type: string
+        default: ''
+      registry:
+        description: 'Container registry'
+        required: false
+        type: string
+        default: 'ghcr.io'
+      runner:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      enable_sbom:
+        description: 'Generate and upload SBOM'
+        required: false
+        type: boolean
+        default: false
+      force_version:
+        description: 'Force specific version (overrides automatic detection)'
+        required: false
+        type: string
+        default: ''
+      buildx_vars:
+        description: 'Additional environment variables for docker/bake-action (lines like KEY=VALUE)'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      version:
+        description: 'The version tag that was built or promoted'
+        value: ${{ jobs.ci-build.outputs.version || jobs.promote.outputs.version || jobs.build.outputs.version }}
+      image:
+        description: 'The full image name (without tag)'
+        value: ${{ jobs.ci-build.outputs.image || jobs.promote.outputs.image || jobs.build.outputs.image }}
+      image_with_tag:
+        description: 'The full image name with tag'
+        value: ${{ jobs.ci-build.outputs.image_with_tag || jobs.promote.outputs.image_with_tag || jobs.build.outputs.image_with_tag }}
+    secrets:
+      registry_username:
+        required: false
+      registry_password:
+        required: false
+
+jobs:
+  ci-build:
+    name: Container Build (CI)
+    if: github.event_name == 'pull_request' && inputs.promote_pr_number == ''
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image: ${{ steps.image.outputs.full_name }}
+      image_with_tag: ${{ inputs.registry }}/${{ steps.image.outputs.full_name }}:${{ steps.version.outputs.version }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+          buildkitd-flags: --debug
+
+      - name: Log in to Container Registry
+        if: inputs.push
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="latest"
+          EVENT_NAME="${{ github.event_name }}"
+          REF="${{ github.ref }}"
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]] && [[ -n "${{ github.event.inputs.version || '' }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "${EVENT_NAME}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          elif [[ "${REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${EVENT_NAME}" == "repository_dispatch" ]]; then
+            VERSION="${{ github.event.client_payload.version || 'latest' }}"
+          elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            VERSION="pr-${{ github.event.pull_request.number }}"
+          elif [[ "${REF}" == "refs/heads/main" ]] || [[ "${REF}" == "refs/heads/master" ]]; then
+            VERSION="latest"
+          else
+            BRANCH="${GITHUB_REF#refs/heads/}"
+            VERSION="${BRANCH//\//-}"
+          fi
+
+          # Override with force_version if provided
+          if [[ -n "${{ inputs.force_version }}" ]]; then
+            VERSION="${{ inputs.force_version }}"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building version: ${VERSION}"
+
+      - name: Set image name
+        id: image
+        run: |
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          # Use image_name if provided, otherwise fall back to bake_target
+          IMAGE_NAME="${{ inputs.image_name }}"
+          if [ -z "${IMAGE_NAME}" ]; then
+            IMAGE_NAME="${{ inputs.bake_target }}"
+          fi
+          IMAGE_LOWER=$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
+          echo "full_name=${OWNER_LOWER}/${IMAGE_LOWER}" >> "$GITHUB_OUTPUT"
+
+      - name: Export build variables
+        if: inputs.buildx_vars != ''
+        run: |
+          # Export each KEY=VALUE pair as environment variable for docker/bake-action
+          # Bake automatically picks up env vars matching variable names in the HCL file
+          printf '%s\n' "${{ inputs.buildx_vars }}" >> "$GITHUB_ENV"
+
+      - name: Build with Docker Bake
+        uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c # v6.9.0
+        with:
+          files: |
+            ${{ inputs.bake_file }}
+          targets: ${{ inputs.bake_target }}
+          push: ${{ inputs.push }}
+          set: |
+            *.cache-from=type=gha,scope=buildkit-${{ inputs.image_name }}
+            *.cache-from=type=gha,scope=buildkit-${{ inputs.image_name }}-${{ github.ref_name }}
+            *.cache-to=type=gha,mode=max,scope=buildkit-${{ inputs.image_name }}-${{ github.ref_name }}
+            *.cache-to=type=inline
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ steps.image.outputs.full_name }}
+          PLATFORMS: ${{ inputs.platforms }}
+
+  promote:
+    name: Promote PR Image
+    if: inputs.promote_pr_number != ''
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image: ${{ steps.image.outputs.full_name }}
+      image_with_tag: ${{ inputs.registry }}/${{ steps.image.outputs.full_name }}:${{ steps.version.outputs.version }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set image name
+        id: image
+        run: |
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          # Use image_name if provided, otherwise fall back to bake_target
+          IMAGE_NAME="${{ inputs.image_name }}"
+          if [ -z "${IMAGE_NAME}" ]; then
+            IMAGE_NAME="${{ inputs.bake_target }}"
+          fi
+          IMAGE_LOWER=$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
+          echo "full_name=${OWNER_LOWER}/${IMAGE_LOWER}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="latest"
+          EVENT_NAME="${{ github.event_name }}"
+          REF="${{ github.ref }}"
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]] && [[ -n "${{ github.event.inputs.version || '' }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "${EVENT_NAME}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          elif [[ "${REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${EVENT_NAME}" == "repository_dispatch" ]]; then
+            VERSION="${{ github.event.client_payload.version || 'latest' }}"
+          elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            VERSION="pr-${{ github.event.pull_request.number }}"
+          elif [[ "${REF}" == "refs/heads/main" ]] || [[ "${REF}" == "refs/heads/master" ]]; then
+            VERSION="latest"
+          else
+            BRANCH="${GITHUB_REF#refs/heads/}"
+            VERSION="${BRANCH//\//-}"
+          fi
+
+          # Override with force_version if provided
+          if [[ -n "${{ inputs.force_version }}" ]]; then
+            VERSION="${{ inputs.force_version }}"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Promoting version: ${VERSION}"
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote PR image tag
+        run: |
+          SOURCE_TAG="${{ inputs.registry }}/${{ steps.image.outputs.full_name }}:pr-${{ inputs.promote_pr_number }}"
+          TARGET_TAG="${{ inputs.registry }}/${{ steps.image.outputs.full_name }}:${{ steps.version.outputs.version }}"
+          echo "Promoting ${SOURCE_TAG} -> ${TARGET_TAG}"
+          docker buildx imagetools create --tag "${TARGET_TAG}" "${SOURCE_TAG}"
+
+  build:
+    name: Build and Push with Docker Bake
+    if: github.event_name != 'pull_request' && inputs.promote_pr_number == ''
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image: ${{ steps.image.outputs.full_name }}
+      image_with_tag: ${{ inputs.registry }}/${{ steps.image.outputs.full_name }}:${{ steps.version.outputs.version }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+          buildkitd-flags: --debug
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="latest"
+          EVENT_NAME="${{ github.event_name }}"
+          REF="${{ github.ref }}"
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]] && [[ -n "${{ github.event.inputs.version || '' }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "${EVENT_NAME}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          elif [[ "${REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${EVENT_NAME}" == "repository_dispatch" ]]; then
+            VERSION="${{ github.event.client_payload.version || 'latest' }}"
+          elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            VERSION="pr-${{ github.event.pull_request.number }}"
+          elif [[ "${REF}" == "refs/heads/main" ]] || [[ "${REF}" == "refs/heads/master" ]]; then
+            VERSION="latest"
+          else
+            BRANCH="${GITHUB_REF#refs/heads/}"
+            VERSION="${BRANCH//\//-}"
+          fi
+
+          # Override with force_version if provided
+          if [[ -n "${{ inputs.force_version }}" ]]; then
+            VERSION="${{ inputs.force_version }}"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building version: ${VERSION}"
+
+      - name: Set image name
+        id: image
+        run: |
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          # Use image_name if provided, otherwise fall back to bake_target
+          IMAGE_NAME="${{ inputs.image_name }}"
+          if [ -z "${IMAGE_NAME}" ]; then
+            IMAGE_NAME="${{ inputs.bake_target }}"
+          fi
+          IMAGE_LOWER=$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
+          echo "full_name=${OWNER_LOWER}/${IMAGE_LOWER}" >> "$GITHUB_OUTPUT"
+
+      - name: Export build variables
+        if: inputs.buildx_vars != ''
+        run: |
+          # Export each KEY=VALUE pair as environment variable for docker/bake-action
+          # Bake automatically picks up env vars matching variable names in the HCL file
+          printf '%s\n' "${{ inputs.buildx_vars }}" >> "$GITHUB_ENV"
+
+      - name: Build with Docker Bake
+        uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c # v6.9.0
+        with:
+          files: |
+            ${{ inputs.bake_file }}
+            ${{ steps.meta.outputs.bake-file }}
+          targets: ${{ (inputs.push && github.event_name != 'pull_request' && inputs.push_target != '') && inputs.push_target || inputs.bake_target }}
+          push: ${{ inputs.push && github.event_name != 'pull_request' }}
+          set: |
+            *.cache-from=type=registry,ref=${{ inputs.registry }}/${{ steps.image.outputs.full_name }}:buildcache
+            *.cache-from=type=gha,scope=buildkit-${{ inputs.image_name }}
+            *.cache-from=type=gha,scope=buildkit-${{ inputs.image_name }}-${{ github.ref_name }}
+            *.cache-to=type=gha,mode=max,scope=buildkit-${{ inputs.image_name }}-${{ github.ref_name }}
+            *.cache-to=type=inline
+            ${{ inputs.push && github.event_name != 'pull_request' && format('*.cache-to=type=registry,ref={0}/{1}:buildcache,mode=max', inputs.registry, steps.image.outputs.full_name) || '' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ steps.image.outputs.full_name }}
+          PLATFORMS: ${{ inputs.platforms }}
+
+#      - name: Generate SBOM
+#        if: inputs.enable_sbom && inputs.push && github.event_name != 'pull_request'
+#        uses: anchore/sbom-action@8e94d75ddd33f69f691467e42275782e4bfefe84 # v0.20.9
+#        with:
+#          image: ${{ inputs.registry }}/${{ steps.image.outputs.full_name }}:${{ steps.version.outputs.version }}
+#          format: spdx-json
+#          output-file: sbom.spdx.json
+#
+#      - name: Upload SBOM
+#        if: inputs.enable_sbom && inputs.push && github.event_name != 'pull_request'
+#        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+#        with:
+#          name: sbom-${{ inputs.image_name }}
+#          path: sbom.spdx.json
+#          retention-days: 90

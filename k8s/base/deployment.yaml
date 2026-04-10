@@ -76,6 +76,9 @@ spec:
           mountPath: /shared
         - name: dshm
           mountPath: /dev/shm
+        - name: cookie-auth-script
+          mountPath: /usr/local/bin/cookie_auth.py
+          subPath: cookie_auth.py
       
       # VPN client container
       - name: vpn
@@ -174,5 +177,8 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: 512Mi
+      - name: cookie-auth-script
+        configMap:
+          name: cookie-auth-script
       
       restartPolicy: Always
