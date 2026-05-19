@@ -4,6 +4,7 @@ namespace: networking
 resources:
   - ../../base
   - secret.enc.yaml
+  - ghcr-pull-secret.enc.yaml
 images:
   - name: ghcr.io/calebsargeant/fortivpn-gateway-cookie
     newTag: v1.2.2 # {"$imagepolicy": "flux-system:cookie:tag"}
