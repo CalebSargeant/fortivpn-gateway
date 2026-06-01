@@ -7,8 +7,8 @@ resources:
   - ghcr-pull-secret.enc.yaml
 images:
   - name: ghcr.io/calebsargeant/fortivpn-gateway-cookie
-    newTag: v1.3.0 # {"$imagepolicy": "flux-system:cookie:tag"}
+    newTag: v1.3.1 # {"$imagepolicy": "flux-system:cookie:tag"}
   - name: ghcr.io/calebsargeant/fortivpn-gateway-vpn
-    newTag: v1.3.0 # {"$imagepolicy": "flux-system:vpn:tag"}
+    newTag: v1.3.1 # {"$imagepolicy": "flux-system:vpn:tag"}
   - name: ghcr.io/calebsargeant/fortivpn-gateway-bgp
-    newTag: v1.3.0 # {"$imagepolicy": "flux-system:bgp:tag"}
+    newTag: v1.3.1 # {"$imagepolicy": "flux-system:bgp:tag"}
