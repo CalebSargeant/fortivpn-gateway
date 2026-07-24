@@ -162,7 +162,7 @@ scripts/e2e-local-k8s.sh
 |----------|----------|---------|-------------|
 | `VPN_GATEWAY` | Yes | - | FortiVPN gateway hostname |
 | `VPN_PORT` | No | `443` | FortiVPN gateway port |
-| `TRUSTED_CERT` | No | - | Gateway certificate digest for validation (e.g., `pin-sha256:base64digest`) |
+| `TRUSTED_CERT` | No | - | Gateway certificate SHA-256 digest for validation, hex-encoded (as printed by openfortivpn) |
 
 #### BGP Container
 | Variable | Required | Default | Description |
@@ -233,13 +233,18 @@ ERROR: Gateway certificate validation failed, and the certificate digest is not 
 ERROR:     trusted-cert = <certificate-digest>
 ```
 
-1. Copy the certificate digest from the error message
-2. Add it to your secret configuration:
-```yaml
-TRUSTED_CERT: "pin-sha256:your-certificate-digest-here"
+the gateway certificate was renewed and the pinned digest is stale.
+
+1. Copy the hex digest from the error message (the value after `trusted-cert = `)
+2. Update it in the SOPS-encrypted secret:
+```bash
+sops set k8s/overlays/prod/secret.enc.yaml '["stringData"]["TRUSTED_CERT"]' '"your-hex-digest-here"'
 ```
-3. Update the secret: `kubectl apply -k k8s/overlays/prod`
-4. Restart the pod to apply changes
+3. Apply the secret: `kubectl apply -k k8s/overlays/prod`
+4. Restart the pod — a Secret change alone does not roll the Deployment:
+```bash
+kubectl rollout restart deployment/fortivpn-gateway -n networking
+```
 
 ### BGP Not Peering
 - Verify MikroTik BGP configuration matches pod settings
