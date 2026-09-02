@@ -1,0 +1,54 @@
+{
+  "name": "fortivpn-gateway",
+  "version": "1.3.4",
+  "description": "Kubernetes-based FortiVPN gateway with automatic Microsoft SAML authentication and BGP routing to MikroTik.",
+  "language": "python",
+  "runtime": "python3",
+  "package_manager": null,
+  "build_tool": "docker buildx bake",
+  "versioning": "python-semantic-release (pyproject.toml)",
+  "ci": ".github/workflows/",
+  "entrypoints": {
+    "cookie_auth": "cookie_auth.py",
+    "cookie_container": "scripts/cookie-sidecar-entrypoint.sh",
+    "vpn_container": "scripts/vpn-entrypoint.sh",
+    "bgp_container": "scripts/bgp-entrypoint.sh"
+  },
+  "containers": {
+    "cookie": {
+      "dockerfile": "Dockerfile.cookie",
+      "purpose": "Automates Microsoft SAML authentication via Selenium and 1Password CLI; writes session cookie to /shared volume."
+    },
+    "vpn": {
+      "dockerfile": "Dockerfile.vpn",
+      "purpose": "Runs OpenFortiVPN client; reads cookie from /shared volume; establishes PPP tunnel."
+    },
+    "bgp": {
+      "dockerfile": "Dockerfile.bgp",
+      "purpose": "Runs BIRD BGP daemon; peers with MikroTik router; advertises VPN routes."
+    }
+  },
+  "infrastructure": {
+    "platform": "Kubernetes (k3s)",
+    "manifests": "k8s/",
+    "base": "k8s/base/",
+    "overlays": ["k8s/overlays/prod/"],
+    "secrets": "SOPS-encrypted with age (*.enc.yaml)"
+  },
+  "key_files": {
+    "cookie_auth.py": "Selenium-based SAML cookie extraction script (Microsoft SSO + 1Password + OTP).",
+    "docker-bake.hcl": "Multi-image Docker Buildx Bake configuration.",
+    "scripts/bird.conf.template": "BIRD BGP daemon configuration template (envsubst-rendered at runtime).",
+    "scripts/e2e-local-k8s.sh": "Local E2E validator for the running Kubernetes deployment.",
+    ".sops.yaml": "SOPS age-key configuration.",
+    "secret.yaml.example": "Template for Kubernetes Secret (OP_SERVICE_ACCOUNT_TOKEN, VPN_GATEWAY, BGP_* vars).",
+    "pyproject.toml": "python-semantic-release configuration only (no Python package)."
+  },
+  "workflows": {
+    "build-release": ".github/workflows/build-release.yaml",
+    "container-image-release": ".github/workflows/container-image-release.yaml",
+    "temp_docker_build_bake": ".github/workflows/temp_docker_build_bake.yaml"
+  },
+  "no_tests": true,
+  "no_linter": true
+}
