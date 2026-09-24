@@ -85,6 +85,12 @@ fi
 echo "cookie: ${COOKIE_OK}"
 echo "vpn:    ${VPN_OK}"
 echo "bgp:    ${BGP_OK}"
+# Not a pass/fail criterion: without it the tunnel works, but every TLS handshake stalls ~10 s.
+if kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -c vpn -- iptables -t mangle -S FORWARD 2>/dev/null | grep -q TCPMSS; then
+    echo "mss:    clamped"
+else
+    echo "mss:    NOT clamped (TLS through the tunnel will stall; see README Troubleshooting)"
+fi
 echo
 
 if [[ "${COOKIE_OK}" == "true" && "${VPN_OK}" == "true" && "${BGP_OK}" == "true" ]]; then

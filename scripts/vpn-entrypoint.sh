@@ -117,7 +117,21 @@ setup_nat() {
         iptables -t nat -A POSTROUTING -o "$vpn_interface" -j MASQUERADE
         echo "Added masquerading rule for $vpn_interface"
     fi
-    
+
+    # Clamp the TCP MSS of connections forwarded into the tunnel to the tunnel's MTU.
+    # Clients on the LAN advertise an MSS for a 1500-byte link, so servers behind the VPN
+    # send full-size segments that do not fit the ppp interface (~1350 bytes). The ICMP
+    # that should shrink them never reaches those servers, so the segments are dropped
+    # until the server's TCP gives up and retries smaller: every TLS handshake stalls for
+    # ~10 seconds, and clients with shorter timeouts (MCP, Go's 10 s TLS limit) fail.
+    # clamp-mss-to-pmtu rewrites the MSS in the SYN from the outgoing interface's MTU.
+    if iptables -t mangle -C FORWARD -o "$vpn_interface" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null; then
+        echo "MSS clamping for $vpn_interface already exists"
+    else
+        iptables -t mangle -A FORWARD -o "$vpn_interface" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+        echo "Added MSS clamping for $vpn_interface (MTU $(cat /sys/class/net/"$vpn_interface"/mtu 2>/dev/null))"
+    fi
+
     # Mark NAT as configured
     NAT_CONFIGURED=true
     

@@ -253,6 +253,15 @@ kubectl rollout restart deployment/fortivpn-gateway -n networking
 - Check bgp container logs: `kubectl logs -n networking <pod> -c bgp`
 - Verify with: `kubectl exec -n networking <pod> -c bgp -- birdc show protocols all`
 
+### HTTPS Through the Tunnel Stalls for ~10 Seconds
+Every new TLS connection to a host behind the VPN hangs in the handshake, then works; tools with
+shorter timeouts fail outright. The tunnel's MTU (~1350) is smaller than the LAN's 1500, and the
+server's full-size segments are dropped. The vpn container clamps the TCP MSS of forwarded
+connections to the tunnel's MTU; check the rule is there:
+```bash
+kubectl exec -n networking <pod> -c vpn -- iptables -t mangle -S FORWARD | grep TCPMSS
+```
+
 ### VPN Routes Not Propagating
 - Check BIRD is learning routes from kernel: `birdc show route protocol kernel`
 - Verify BGP export policy in `bird.conf.template`
