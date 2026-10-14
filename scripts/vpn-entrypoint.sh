@@ -14,6 +14,7 @@ MIN_BACKOFF=30        # Start with 30 seconds
 MAX_BACKOFF=900       # Max 15 minutes between retries
 BACKOFF_MULTIPLIER=2  # Double the wait time on each failure
 MAX_RETRIES=0         # 0 = infinite retries
+STABLE_SESSION_SECONDS=300  # A session that lasted this long ended, it did not fail
 RETRY_COUNT=0
 CURRENT_BACKOFF=$MIN_BACKOFF
 
@@ -158,8 +159,19 @@ while true; do
     wait_for_cookie
 
     echo "Attempting VPN connection (attempt $((RETRY_COUNT + 1)))..."
+    STARTED_AT=$(date +%s)
     connect_vpn
     EXIT_CODE=$?
+    UPTIME=$(( $(date +%s) - STARTED_AT ))
+
+    # The gateway ends every session at its lifetime limit with a hangup (exit 1), so skip the backoff
+    if [ $UPTIME -ge $STABLE_SESSION_SECONDS ]; then
+        echo "VPN session ended after ${UPTIME}s (exit code: $EXIT_CODE), reconnecting with fresh authentication..."
+        CURRENT_BACKOFF=$MIN_BACKOFF
+        RETRY_COUNT=0
+        rm -f "$COOKIE_FILE"
+        continue
+    fi
 
     if [ $EXIT_CODE -eq 0 ]; then
         echo "VPN disconnected cleanly"
